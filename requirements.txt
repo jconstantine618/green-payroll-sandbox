@@ -1,18 +1,17 @@
-# ── Base UI / runtime ───────────────────────────────
+# Streamlit runtime
 streamlit>=1.32
 
-# ── LLM client ──────────────────────────────────────
+# LLM client
 openai>=1.14
 
-# ── Text-to-speech  (ElevenLabs + fallback) ────────
-elevenlabs>=1.0
-gTTS>=2.5
-
-# ── Voice input (recording + WAV helper) ───────────
-streamlit-webrtc>=0.53
-soundfile>=0.12
+# WebRTC widget & dependencies
+streamlit-webrtc>=0.47
 av>=10.0.0
-numpy>=1.24
+soundfile>=0.12
 
-# ── .env convenience (optional but handy) ──────────
+# Text-to-speech
+elevenlabs>=1.0         # optional – use if ELEVEN_API_KEY is set
+gTTS>=2.5               # fallback TTS
+
+# .env convenience (optional)
 python-dotenv>=1.0

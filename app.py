@@ -2,13 +2,14 @@
 """
 Green‑Payroll Sales Trainer   (Streamlit + OpenAI + voice I/O)
 
-•  Tick “Speak instead of type” → press Start, talk, Stop, then Send.
-•  Assistant can reply with TTS if “Read assistant replies aloud” checked.
+• Tick “Speak instead of type” → press Start, talk, Stop, then Send.
+• Assistant can reply with TTS if “Read assistant replies aloud” checked.
 
 Python ≥3.9   •   see requirements.txt
 """
 from __future__ import annotations
-import os, io, wave, tempfile, pathlib
+
+import os, io, wave, tempfile, pathlib, base64, uuid
 import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
@@ -16,13 +17,13 @@ from openai import OpenAI, BadRequestError
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 
 # ── CONFIG ───────────────────────────────────────────────────────────
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY")          # optional
-TMP_DIR        = pathlib.Path(tempfile.gettempdir())
-WHISPER_MODEL  = "whisper-1"
-GPT_MODEL      = "gpt-4o-mini"
-ASSISTANT_VOICE= "elevenlabs/Antoni"
+load_dotenv()                           # picks up .env in dev, secrets in prod
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "")
+ELEVEN_API_KEY  = os.getenv("ELEVEN_API_KEY")          # optional
+ELEVEN_VOICE_ID = os.getenv("ELEVEN_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")  # Antoni
+TMP_DIR         = pathlib.Path(tempfile.gettempdir())
+WHISPER_MODEL   = "whisper-1"
+GPT_MODEL       = "gpt-4o-mini"
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -46,23 +47,27 @@ SCENARIOS = {
     # …add more scenarios here…
 }
 
-# ── TTS UTIL ──────────────────────────────────────────────────────────
+# ── TTS UTILITIES ────────────────────────────────────────────────────
 def tts_bytes(text: str) -> io.BytesIO | None:
-    """Return MP3 bytes via ElevenLabs (preferred) or gTTS fallback."""
+    """
+    Returns an MP3 buffer.  Prefers ElevenLabs SDK v1; falls back to gTTS.
+    """
+    # ① ElevenLabs
     if ELEVEN_API_KEY:
         try:
-            from elevenlabs import generate, VoiceSettings, set_api_key
-            set_api_key(ELEVEN_API_KEY)
-            audio = generate(
+            from elevenlabs.client import ElevenLabs
+            el_client = ElevenLabs(api_key=ELEVEN_API_KEY)
+            audio = el_client.text_to_speech.convert(
                 text=text,
-                voice=ASSISTANT_VOICE.split("/")[-1],
-                model="eleven_multilingual_v2",
-                voice_settings=VoiceSettings(stability=0.35, similarity_boost=0.7),
+                voice_id=ELEVEN_VOICE_ID,
+                model_id="eleven_multilingual_v2",
+                output_format="mp3_44100_128",
             )
             return io.BytesIO(audio)
         except Exception as e:
             st.warning(f"ElevenLabs TTS failed ({e}); falling back to gTTS…")
 
+    # ② gTTS fallback
     try:
         from gtts import gTTS
         buf = io.BytesIO()
@@ -70,17 +75,38 @@ def tts_bytes(text: str) -> io.BytesIO | None:
         buf.seek(0)
         return buf
     except Exception as e:
-        st.warning(f"gTTS failed ({e}). No audio will be played.")
+        st.error(f"gTTS failed ({e}). No audio will be played.")
         return None
 
-# ── VOICE IN (WebRTC → Whisper) ───────────────────────────────────────
+
+def auto_play(audio_buf: io.BytesIO):
+    """
+    Injects an <audio autoplay> tag so the clip starts without an extra click.
+    """
+    b64 = base64.b64encode(audio_buf.getvalue()).decode()
+    uid = uuid.uuid4().hex
+    st.markdown(
+        f"""
+        <audio id="{uid}" autoplay>
+          <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+        </audio>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# ── VOICE‑IN  (WebRTC → Whisper) ─────────────────────────────────────
 def record_and_transcribe() -> str | None:
+    """
+    1. Creates / reuses a WebRTC recorder component.
+    2. Waits until the user *stops* recording and presses “Send”.
+    3. Saves audio, sends to Whisper, returns transcript.
+    """
     ctx = webrtc_streamer(
         key="speech",
         mode=WebRtcMode.SENDONLY,
         media_stream_constraints={"video": False, "audio": True},
         sendback_audio=False,
-        translations={"select_device": ""},  # hide dropdown label
+        translations={"select_device": ""},  # hide label text
     )
 
     if "audio_ready" not in st.session_state:
@@ -89,20 +115,23 @@ def record_and_transcribe() -> str | None:
     def _send_btn_disabled() -> bool:
         return not (ctx and not ctx.state.playing and st.session_state.audio_ready)
 
-    st.button("▶️ Send recording", key="send_audio_btn",
-              disabled=_send_btn_disabled())
+    st.button(
+        "▶️ Send recording",
+        key="send_audio_btn",
+        disabled=_send_btn_disabled(),
+    )
 
-    # 1️⃣ Recording
+    # 1️⃣ Recording
     if ctx.state.playing:
         st.session_state.audio_ready = True
         st.info("Recording… press **Stop** when finished, then click **Send**.")
         st.stop()
 
-    # 2️⃣ Waiting for “Send recording”
+    # 2️⃣ Waiting for “Send recording”
     if st.session_state.get("send_audio_btn") is False:
         st.stop()
 
-    # 3️⃣ Process
+    # 3️⃣ Process after Send
     if ctx.audio_receiver and st.session_state.audio_ready:
         frames = ctx.audio_receiver.get_frames(timeout=1)
         if not frames:
@@ -170,7 +199,7 @@ if not st.session_state.history:
 
 # ── CONVERSATION FLOW ────────────────────────────────────────────────
 def handle_turn():
-    # ① Get user input
+    # ① Get user input
     user_text: str | None
     if speak_mode:
         user_text = record_and_transcribe()
@@ -180,22 +209,23 @@ def handle_turn():
     if not user_text:
         return
 
-    # ② Show user bubble
+    # ② Show user bubble
     with st.chat_message("user"):
         st.write(user_text)
 
-    # ③ Assistant response
+    # ③ Assistant response
     assistant_text = chat(user_text)
     with st.chat_message("assistant"):
         st.write(assistant_text)
         if voice_reply:
-            audio = tts_bytes(assistant_text)
-            if audio:
-                st.audio(audio, format="audio/mp3")
+            audio_buf = tts_bytes(assistant_text)
+            if audio_buf:
+                auto_play(audio_buf)                     # auto‑start
+                # st.audio(audio_buf, format="audio/mp3")  # optional manual player
 
 handle_turn()
 
-# ── DEBUG (show only if asked) ────────────────────────────────────────
+# ── DEBUG (optional) ─────────────────────────────────────────────────
 if show_debug:
     with st.expander("📜 Conversation (debug)", expanded=False):
         st.json(st.session_state.history)
@@ -204,11 +234,11 @@ if show_debug:
 st.markdown(
     """
     <style>
-    /* Hide the select‑device label reliably */
-    div[data-testid="stSelectbox"] label {display:none !important;}
+      /* hide select‑device label in streamlit‑webrtc */
+      div[data-testid="stSelectbox"] label {display:none !important;}
 
-    /* Optional: tighten chat input space on tall monitors */
-    .block-container {padding-top: 1rem;}
+      /* tighten padding a bit */
+      .block-container {padding-top: 1rem;}
     </style>
     """,
     unsafe_allow_html=True,

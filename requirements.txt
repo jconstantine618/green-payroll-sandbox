@@ -1,16 +1,7 @@
-# — Base UI / runtime
 streamlit>=1.32
-
-# — LLM + Whisper
 openai>=1.14
-
-# — audio / WebRTC
 streamlit-webrtc>=0.47.2
 numpy>=1.26
-
-# — Text-to-speech
-elevenlabs>=1.0          # official ElevenLabs SDK (optional)
-gTTS>=2.5                # fallback if ELEVEN_API_KEY isn’t set
-
-# — .env convenience
+elevenlabs>=1.0
+gTTS>=2.5
 python-dotenv>=1.0

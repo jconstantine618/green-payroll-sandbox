@@ -1,13 +1,12 @@
-# app.py ──────────────────────────────────────────────────────────────
+# app.py  ──────────────────────────────────────────────────────────────
 """
-Green-Payroll Sales Trainer   (Streamlit + OpenAI + voice I/O)
+Green‑Payroll Sales Trainer   (Streamlit + OpenAI + voice I/O)
 
 •  Tick “Speak instead of type” → press Start, talk, Stop, then Send.
 •  Assistant can reply with TTS if “Read assistant replies aloud” checked.
 
-Python ≥3.9   •   requires the packages listed in requirements.txt
+Python ≥3.9   •   see requirements.txt
 """
-
 from __future__ import annotations
 import os, io, wave, tempfile, pathlib
 import numpy as np
@@ -17,27 +16,27 @@ from openai import OpenAI, BadRequestError
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 
 # ── CONFIG ───────────────────────────────────────────────────────────
-load_dotenv()                              # .env in local dev
+load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY")          # optional
 TMP_DIR        = pathlib.Path(tempfile.gettempdir())
 WHISPER_MODEL  = "whisper-1"
 GPT_MODEL      = "gpt-4o-mini"
-ASSISTANT_VOICE= "elevenlabs/Antoni"                  # or any voice
+ASSISTANT_VOICE= "elevenlabs/Antoni"
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-st.set_page_config("Sales-Trainer", "🎤", layout="wide")
-st.sidebar.title("⚙️ Controls")
+st.set_page_config("Sales‑Trainer", "🎤", layout="wide")
+st.sidebar.title("⚙️ Controls")
 
 # ── SCENARIOS ─────────────────────────────────────────────────────────
 SCENARIOS = {
-    "Sunshine Daycare Centers (Child-care)": dict(
-        persona    = "Karen Lopez (Owner / Director)",
+    "Sunshine Daycare Centers (Child‑care)": dict(
+        persona    = "Karen Lopez (Owner / Director)",
         background = "Handles HR and scheduling. Wants mobile access.",
         company    = "Sunshine Daycare Centers",
         difficulty = "Easy",
-        time       = "10 min",
+        time       = "10 min",
         prompt     = (
             "You are a payroll SaaS sales rep calling Karen Lopez at "
             "Sunshine Daycare Centers. Ask discovery questions with empathy "
@@ -74,47 +73,36 @@ def tts_bytes(text: str) -> io.BytesIO | None:
         st.warning(f"gTTS failed ({e}). No audio will be played.")
         return None
 
-# ── VOICE-IN  (WebRTC → Whisper) ──────────────────────────────────────
+# ── VOICE IN (WebRTC → Whisper) ───────────────────────────────────────
 def record_and_transcribe() -> str | None:
-    """
-    1.  Creates / reuses a WebRTC recorder component.
-    2.  Waits until the user *stops* recording and presses “Send”.
-    3.  Saves audio, sends to Whisper, returns transcript text.
-    """
     ctx = webrtc_streamer(
         key="speech",
         mode=WebRtcMode.SENDONLY,
         media_stream_constraints={"video": False, "audio": True},
         sendback_audio=False,
-        # ↓ hide device selector with CSS; still functional
-        translations={"select_device": ""},
+        translations={"select_device": ""},  # hide dropdown label
     )
 
-    #  We use Streamlit session-state flags to know recording status
     if "audio_ready" not in st.session_state:
         st.session_state.audio_ready = False
 
-    # — UI helper —
     def _send_btn_disabled() -> bool:
         return not (ctx and not ctx.state.playing and st.session_state.audio_ready)
 
-    st.button(
-        "▶️ Send recording",
-        key="send_audio_btn",
-        disabled=_send_btn_disabled(),
-    )
+    st.button("▶️ Send recording", key="send_audio_btn",
+              disabled=_send_btn_disabled())
 
-    # 1️⃣  Recording phase
+    # 1️⃣ Recording
     if ctx.state.playing:
-        st.session_state.audio_ready = True     # we’ll have something to fetch
-        st.info("Recording… press **Stop** when finished, then click **Send**.")
+        st.session_state.audio_ready = True
+        st.info("Recording… press **Stop** when finished, then click **Send**.")
         st.stop()
 
-    # 2️⃣  Waiting for user to hit “Send recording”
+    # 2️⃣ Waiting for “Send recording”
     if st.session_state.get("send_audio_btn") is False:
         st.stop()
 
-    # 3️⃣  Collect frames only once after Send
+    # 3️⃣ Process
     if ctx.audio_receiver and st.session_state.audio_ready:
         frames = ctx.audio_receiver.get_frames(timeout=1)
         if not frames:
@@ -123,7 +111,7 @@ def record_and_transcribe() -> str | None:
             return None
 
         samples = np.concatenate([f.to_ndarray().flatten() for f in frames])
-        sr      = frames[0].sample_rate
+        sr = frames[0].sample_rate
         wav_path = TMP_DIR / "speech.wav"
         with wave.open(wav_path, "wb") as wf:
             wf.setnchannels(1)
@@ -137,7 +125,7 @@ def record_and_transcribe() -> str | None:
                 file=open(wav_path, "rb"),
                 response_format="text",
             )
-            st.session_state.audio_ready = False  # reset for next turn
+            st.session_state.audio_ready = False
             return rsp.text.strip()
         except BadRequestError:
             st.warning("Whisper could not transcribe audio. Try again.")
@@ -160,12 +148,13 @@ if "history" not in st.session_state:
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────
 scenario_name = st.sidebar.selectbox("Choose a scenario", SCENARIOS.keys())
-speak_mode    = st.sidebar.checkbox("🎤 Speak instead of type", value=False)
-voice_reply   = st.sidebar.checkbox("🔊 Read assistant replies aloud")
+speak_mode    = st.sidebar.checkbox("🎤 Speak instead of type", value=False)
+voice_reply   = st.sidebar.checkbox("🔊 Read assistant replies aloud")
+show_debug    = st.sidebar.checkbox("👀 Show debug JSON", value=False)
 
 # ── HEADER ────────────────────────────────────────────────────────────
 sc = SCENARIOS[scenario_name]
-st.title("💬 Chatbot")
+st.title("💬 Chatbot")
 st.markdown(
     f"""
 **Persona**: {sc['persona']}  
@@ -181,7 +170,7 @@ if not st.session_state.history:
 
 # ── CONVERSATION FLOW ────────────────────────────────────────────────
 def handle_turn():
-    # ①  Get user input
+    # ① Get user input
     user_text: str | None
     if speak_mode:
         user_text = record_and_transcribe()
@@ -191,11 +180,11 @@ def handle_turn():
     if not user_text:
         return
 
-    # ②  Show user bubble
+    # ② Show user bubble
     with st.chat_message("user"):
         st.write(user_text)
 
-    # ③  Assistant response
+    # ③ Assistant response
     assistant_text = chat(user_text)
     with st.chat_message("assistant"):
         st.write(assistant_text)
@@ -206,17 +195,21 @@ def handle_turn():
 
 handle_turn()
 
-# ── DEBUG (collapsed by default) ──────────────────────────────────────
-with st.expander("📜 Conversation (debug)", expanded=False):
-    st.json(st.session_state.history)
+# ── DEBUG (show only if asked) ────────────────────────────────────────
+if show_debug:
+    with st.expander("📜 Conversation (debug)", expanded=False):
+        st.json(st.session_state.history)
 
-# ── HIDE “SELECT DEVICE” LABEL WITH CSS (optional) ────────────────────
+# ── CSS HACKS ─────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
-    label:has(> span[data-testid="stMarkdownContainer"]:contains("select device")) {
-        display:none !important;
-    }
-    </style>""",
+    /* Hide the select‑device label reliably */
+    div[data-testid="stSelectbox"] label {display:none !important;}
+
+    /* Optional: tighten chat input space on tall monitors */
+    .block-container {padding-top: 1rem;}
+    </style>
+    """,
     unsafe_allow_html=True,
 )

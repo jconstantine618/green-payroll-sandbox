@@ -1,0 +1,222 @@
+[
+  {
+    "id": 1,
+    "prospect": "Sunshine Daycare Centers",
+    "category": "Childcare",
+    "playbook_highlight": "All‑in‑One Workforce Platform",
+    "difficulty": { "level": "Easy" },
+    "prospect_description": "Daycare with 3 metro‑Atlanta locations. Struggles with PTO and tax rules.",
+    "decision_makers": [
+      {
+        "persona_name": "Karen Lopez",
+        "persona_role": "Owner / Director",
+        "persona_background": "Handles HR and scheduling. Wants mobile access.",
+        "time_availability": { "window": 10 }
+      },
+      {
+        "persona_name": "Brianna Wells",
+        "persona_role": "Assistant Director",
+        "persona_background": "Manages billing. Needs QuickBooks exports.",
+        "time_availability": { "window": 10 }
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "prospect": "Riverside Brewing Co.",
+    "category": "Hospitality",
+    "playbook_highlight": "Compliance Peace of Mind",
+    "difficulty": { "level": "Medium" },
+    "prospect_description": "Brewery + taproom with tip credit compliance issues.",
+    "decision_makers": [
+      {
+        "persona_name": "Marcus Nguyen",
+        "persona_role": "General Manager",
+        "persona_background": "Wants better overtime handling.",
+        "time_availability": { "window": 15 }
+      },
+      {
+        "persona_name": "Olivia Chen",
+        "persona_role": "Taproom Manager",
+        "persona_background": "Manages 40+ tipped workers.",
+        "time_availability": { "window": 15 }
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "prospect": "Silver Oak Home Health",
+    "category": "Healthcare",
+    "playbook_highlight": "Dedicated Service Team",
+    "difficulty": { "level": "Hard" },
+    "prospect_description": "220 caregivers across states. Needs credential tracking + shift pay.",
+    "decision_makers": [
+      {
+        "persona_name": "Dr. Aisha Patel",
+        "persona_role": "Chief Clinical Officer",
+        "persona_background": "Wants compliance-ready workflows.",
+        "time_availability": { "window": 20 }
+      },
+      {
+        "persona_name": "Gavin Morales",
+        "persona_role": "Payroll Supervisor",
+        "persona_background": "Handles complex stipends and garnishments.",
+        "time_availability": { "window": 20 }
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "prospect": "Peak Construction Group",
+    "category": "Construction",
+    "playbook_highlight": "Seamless Integrations",
+    "difficulty": { "level": "Medium" },
+    "prospect_description": "125 employees across job sites. Needs DOT-certified payroll reports.",
+    "decision_makers": [
+      {
+        "persona_name": "Tom Gallagher",
+        "persona_role": "CFO",
+        "persona_background": "Wants job costing tied to Sage.",
+        "time_availability": { "window": 15 }
+      },
+      {
+        "persona_name": "Maya Chavez",
+        "persona_role": "HR & Safety Manager",
+        "persona_background": "Handles onboarding and OSHA logs.",
+        "time_availability": { "window": 15 }
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "prospect": "Pet Wellness Veterinary Group",
+    "category": "Professional Services",
+    "playbook_highlight": "All‑in‑One Workforce Platform",
+    "difficulty": { "level": "Easy" },
+    "prospect_description": "Multi-location vet clinic group (60 employees).",
+    "decision_makers": [
+      {
+        "persona_name": "Elena Ruiz",
+        "persona_role": "Practice Administrator",
+        "persona_background": "Manages scheduling and tax filing.",
+        "time_availability": { "window": 10 }
+      },
+      {
+        "persona_name": "Dr. Paul Bennett",
+        "persona_role": "Medical Director",
+        "persona_background": "Wants visibility into staff PTO and payroll costs.",
+        "time_availability": { "window": 10 }
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "prospect": "MetroTech SaaS",
+    "category": "Technology",
+    "playbook_highlight": "Seamless Integrations",
+    "difficulty": { "level": "Hard" },
+    "prospect_description": "30-employee startup hiring fast. Remote teams in 7 states.",
+    "decision_makers": [
+      {
+        "persona_name": "Devon Carter",
+        "persona_role": "Head of People Ops",
+        "persona_background": "Wants HRIS integration and API access.",
+        "time_availability": { "window": 20 }
+      },
+      {
+        "persona_name": "Leila O'Connor",
+        "persona_role": "Controller",
+        "persona_background": "Wants automatic state tax handling.",
+        "time_availability": { "window": 20 }
+      }
+    ]
+  },
+  {
+    "id": 7,
+    "prospect": "Heritage Accounting LLP",
+    "category": "Finance",
+    "playbook_highlight": "Dedicated Service Team",
+    "difficulty": { "level": "Medium" },
+    "prospect_description": "CPA firm with 55 staff and outsourced payroll clients.",
+    "decision_makers": [
+      {
+        "persona_name": "Joyce Kim",
+        "persona_role": "Managing Partner",
+        "persona_background": "Exploring tech-forward payroll partnerships.",
+        "time_availability": { "window": 15 }
+      },
+      {
+        "persona_name": "Ethan Roberts",
+        "persona_role": "Payroll Services Manager",
+        "persona_background": "Handles 120+ monthly runs. Wants QuickBooks sync.",
+        "time_availability": { "window": 15 }
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "prospect": "Fresh Fields Grocery Co-op",
+    "category": "Retail",
+    "playbook_highlight": "Compliance Peace of Mind",
+    "difficulty": { "level": "Hard" },
+    "prospect_description": "150-employee co-op. High turnover. Needs bilingual portals.",
+    "decision_makers": [
+      {
+        "persona_name": "Luis Hernández",
+        "persona_role": "HR Coordinator",
+        "persona_background": "Wants cleaner timekeeping and scheduling.",
+        "time_availability": { "window": 20 }
+      },
+      {
+        "persona_name": "Dana Whitaker",
+        "persona_role": "Finance Director",
+        "persona_background": "Handles wage grant reports.",
+        "time_availability": { "window": 20 }
+      }
+    ]
+  },
+  {
+    "id": 9,
+    "prospect": "Adventure Outfitters Inc.",
+    "category": "eCommerce / Distribution",
+    "playbook_highlight": "Seamless Integrations",
+    "difficulty": { "level": "Medium" },
+    "prospect_description": "Omnichannel retailer (85 warehouse, 40 HQ). Wants ACA tracking + SSO.",
+    "decision_makers": [
+      {
+        "persona_name": "Becca Lawrence",
+        "persona_role": "Operations Director",
+        "persona_background": "Needs better implementation and time tools.",
+        "time_availability": { "window": 15 }
+      },
+      {
+        "persona_name": "Jordan Fisher",
+        "persona_role": "IT Lead",
+        "persona_background": "Wants webhook integration.",
+        "time_availability": { "window": 15 }
+      }
+    ]
+  },
+  {
+    "id": 10,
+    "prospect": "Hope Harbor 501(c)(3)",
+    "category": "Non-Profit",
+    "playbook_highlight": "Dedicated Service Team",
+    "difficulty": { "level": "Easy" },
+    "prospect_description": "Shelter and outreach nonprofit (40 staff). Needs grant-ready reporting.",
+    "decision_makers": [
+      {
+        "persona_name": "Samuel Johnson",
+        "persona_role": "Executive Director",
+        "persona_background": "Mission-focused. Needs reliability, not bells and whistles.",
+        "time_availability": { "window": 10 }
+      },
+      {
+        "persona_name": "Kimberly Allen",
+        "persona_role": "Grants Manager",
+        "persona_background": "Needs reporting by program/funder.",
+        "time_availability": { "window": 10 }
+      }
+    ]
+  }
+]

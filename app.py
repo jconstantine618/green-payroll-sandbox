@@ -1,54 +1,56 @@
-# app.py  ──────────────────────────────────────────────────────────────────
+# app.py ──────────────────────────────────────────────────────────────
 """
-Green-Payroll Sales Trainer — Streamlit demo with:
-•   text chat  or
-•   voice-in  (WebRTC + Whisper-1)      and optional
-•   voice-out (ElevenLabs or gTTS)
+Green-Payroll Sales Trainer   (Streamlit + OpenAI + voice I/O)
 
-Works on Streamlit Community Cloud or any Python ≥3.9 runtime.
+•  Tick “Speak instead of type” → press Start, talk, Stop, then Send.
+•  Assistant can reply with TTS if “Read assistant replies aloud” checked.
+
+Python ≥3.9   •   requires the packages listed in requirements.txt
 """
+
 from __future__ import annotations
-
-import os, io, pathlib, tempfile, wave
+import os, io, wave, tempfile, pathlib
 import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI, BadRequestError
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 
-# ─────────────────────────────────────────  CONFIG
-load_dotenv()                         # enables .env local dev
-st.set_page_config(page_title="Sales Trainer", page_icon="🎤", layout="wide")
-
-OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY")
-ELEVEN_API_KEY   = os.getenv("ELEVEN_API_KEY")          # optional
-WHISPER_MODEL    = "whisper-1"
-GPT_MODEL        = "gpt-4o-mini"                        # or "gpt-3.5-turbo"
-ASSISTANT_VOICE  = "elevenlabs/Antoni"                  # or any Eleven voice
-TMP_DIR          = pathlib.Path(tempfile.gettempdir())
+# ── CONFIG ───────────────────────────────────────────────────────────
+load_dotenv()                              # .env in local dev
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY")          # optional
+TMP_DIR        = pathlib.Path(tempfile.gettempdir())
+WHISPER_MODEL  = "whisper-1"
+GPT_MODEL      = "gpt-4o-mini"
+ASSISTANT_VOICE= "elevenlabs/Antoni"                  # or any voice
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ─────────────────────────────────────────  DATA
+st.set_page_config("Sales-Trainer", "🎤", layout="wide")
+st.sidebar.title("⚙️ Controls")
+
+# ── SCENARIOS ─────────────────────────────────────────────────────────
 SCENARIOS = {
     "Sunshine Daycare Centers (Child-care)": dict(
-        persona   = "Karen Lopez (Owner / Director)",
-        background= "Handles HR and scheduling. Wants mobile access.",
-        company   = "Sunshine Daycare Centers",
-        difficulty= "Easy",
-        time      = "10 minutes",
-        prompt    = (
-            "You are a payroll SaaS sales rep calling Karen Lopez … "
-            "Ask discovery questions with empathy and keep responses short."
+        persona    = "Karen Lopez (Owner / Director)",
+        background = "Handles HR and scheduling. Wants mobile access.",
+        company    = "Sunshine Daycare Centers",
+        difficulty = "Easy",
+        time       = "10 min",
+        prompt     = (
+            "You are a payroll SaaS sales rep calling Karen Lopez at "
+            "Sunshine Daycare Centers. Ask discovery questions with empathy "
+            "and keep responses short."
         ),
     ),
-    # Add more scenarios here …
+    # …add more scenarios here…
 }
 
-# ─────────────────────────────────────────  UTILITIES
-def text_to_speech(text: str) -> io.BytesIO | None:
-    """Return audio (mp3) bytes for *text* using ElevenLabs or gTTS fallback."""
-    if ELEVEN_API_KEY:                                 # ― ElevenLabs
+# ── TTS UTIL ──────────────────────────────────────────────────────────
+def tts_bytes(text: str) -> io.BytesIO | None:
+    """Return MP3 bytes via ElevenLabs (preferred) or gTTS fallback."""
+    if ELEVEN_API_KEY:
         try:
             from elevenlabs import generate, VoiceSettings, set_api_key
             set_api_key(ELEVEN_API_KEY)
@@ -60,101 +62,127 @@ def text_to_speech(text: str) -> io.BytesIO | None:
             )
             return io.BytesIO(audio)
         except Exception as e:
-            st.warning(f"ElevenLabs TTS failed ({e}). Falling back to gTTS…")
+            st.warning(f"ElevenLabs TTS failed ({e}); falling back to gTTS…")
 
-    # ― gTTS fallback
     try:
         from gtts import gTTS
-        tts = gTTS(text=text, lang="en", slow=False)
         buf = io.BytesIO()
-        tts.write_to_fp(buf)
+        gTTS(text=text, lang="en", slow=False).write_to_fp(buf)
         buf.seek(0)
         return buf
     except Exception as e:
         st.warning(f"gTTS failed ({e}). No audio will be played.")
         return None
 
-
+# ── VOICE-IN  (WebRTC → Whisper) ──────────────────────────────────────
 def record_and_transcribe() -> str | None:
     """
-    Capture microphone input via WebRTC, save a clean mono/16-bit WAV,
-    send it to Whisper-1 and return the transcript (None if not ready).
+    1.  Creates / reuses a WebRTC recorder component.
+    2.  Waits until the user *stops* recording and presses “Send”.
+    3.  Saves audio, sends to Whisper, returns transcript text.
     """
     ctx = webrtc_streamer(
         key="speech",
         mode=WebRtcMode.SENDONLY,
         media_stream_constraints={"video": False, "audio": True},
         sendback_audio=False,
+        # ↓ hide device selector with CSS; still functional
+        translations={"select_device": ""},
     )
 
-    if not ctx.audio_receiver:                         # user hasn’t clicked Start
-        return None
+    #  We use Streamlit session-state flags to know recording status
+    if "audio_ready" not in st.session_state:
+        st.session_state.audio_ready = False
 
-    frames = ctx.audio_receiver.get_frames(timeout=2)
-    if len(frames) < 20:                               # <≈ ½ s of audio → ignore
-        return None
+    # — UI helper —
+    def _send_btn_disabled() -> bool:
+        return not (ctx and not ctx.state.playing and st.session_state.audio_ready)
 
-    samples = np.concatenate([f.to_ndarray().flatten() for f in frames])
-    sr       = frames[0].sample_rate
-    wav_path = TMP_DIR / "speech.wav"
+    st.button(
+        "▶️ Send recording",
+        key="send_audio_btn",
+        disabled=_send_btn_disabled(),
+    )
 
-    # write mono/16-bit WAV (Whisper’s favourite format)
-    with wave.open(wav_path, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sr)
-        wf.writeframes(samples.tobytes())
+    # 1️⃣  Recording phase
+    if ctx.state.playing:
+        st.session_state.audio_ready = True     # we’ll have something to fetch
+        st.info("Recording… press **Stop** when finished, then click **Send**.")
+        st.stop()
 
-    try:
-        rsp = client.audio.transcriptions.create(
-            model=WHISPER_MODEL,
-            file=open(wav_path, "rb"),
-            response_format="text",
-        )
-        return rsp.text.strip()
-    except BadRequestError:
-        st.warning("⚠️ Whisper couldn’t understand. Try speaking a bit longer.")
-        return None
+    # 2️⃣  Waiting for user to hit “Send recording”
+    if st.session_state.get("send_audio_btn") is False:
+        st.stop()
 
+    # 3️⃣  Collect frames only once after Send
+    if ctx.audio_receiver and st.session_state.audio_ready:
+        frames = ctx.audio_receiver.get_frames(timeout=1)
+        if not frames:
+            st.warning("No speech detected. Try again.")
+            st.session_state.audio_ready = False
+            return None
 
-def chat_completion(user_text: str, history: list[dict]) -> str:
-    """Call the LLM with the running message history."""
-    msgs = history + [{"role": "user", "content": user_text}]
-    rsp  = client.chat.completions.create(model=GPT_MODEL, messages=msgs)
-    return rsp.choices[0].message.content.strip()
+        samples = np.concatenate([f.to_ndarray().flatten() for f in frames])
+        sr      = frames[0].sample_rate
+        wav_path = TMP_DIR / "speech.wav"
+        with wave.open(wav_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            wf.writeframes(samples.tobytes())
 
+        try:
+            rsp = client.audio.transcriptions.create(
+                model=WHISPER_MODEL,
+                file=open(wav_path, "rb"),
+                response_format="text",
+            )
+            st.session_state.audio_ready = False  # reset for next turn
+            return rsp.text.strip()
+        except BadRequestError:
+            st.warning("Whisper could not transcribe audio. Try again.")
+            st.session_state.audio_ready = False
+            return None
 
-# ─────────────────────────────────────────  MAIN UI
+# ── GPT CHAT ──────────────────────────────────────────────────────────
+def chat(user_msg: str) -> str:
+    history = st.session_state.history
+    msgs = history + [{"role": "user", "content": user_msg}]
+    rsp = client.chat.completions.create(model=GPT_MODEL, messages=msgs)
+    assistant_msg = rsp.choices[0].message.content.strip()
+    history.extend([{"role": "user", "content": user_msg},
+                    {"role": "assistant", "content": assistant_msg}])
+    return assistant_msg
+
+# ── STATE INIT ────────────────────────────────────────────────────────
 if "history" not in st.session_state:
     st.session_state.history = []
-if "conversation_running" not in st.session_state:
-    st.session_state.conversation_running = False
 
-st.sidebar.title("⚙️ Controls")
-scenario_key = st.sidebar.selectbox("Choose a scenario", list(SCENARIOS))
-speak_mode   = st.sidebar.checkbox("🎙️ Speak instead of type", value=False)
-voice_reply  = st.sidebar.checkbox("🔊 Read assistant replies aloud")
+# ── SIDEBAR ───────────────────────────────────────────────────────────
+scenario_name = st.sidebar.selectbox("Choose a scenario", SCENARIOS.keys())
+speak_mode    = st.sidebar.checkbox("🎤 Speak instead of type", value=False)
+voice_reply   = st.sidebar.checkbox("🔊 Read assistant replies aloud")
 
-scenario = SCENARIOS[scenario_key]
+# ── HEADER ────────────────────────────────────────────────────────────
+sc = SCENARIOS[scenario_name]
 st.title("💬 Chatbot")
 st.markdown(
     f"""
-**Persona**: {scenario['persona']}  
-**Background**: {scenario['background']}  
-**Company**: {scenario['company']}  
-**Difficulty**: {scenario['difficulty']}  
-**Time Available**: {scenario['time']}  
+**Persona**: {sc['persona']}  
+**Background**: {sc['background']}  
+**Company**: {sc['company']}  
+**Difficulty**: {sc['difficulty']}  
+**Time Available**: {sc['time']}  
 """
 )
 
-# prompt the assistant at first run
 if not st.session_state.history:
-    st.session_state.history.append(
-        {"role": "system", "content": scenario["prompt"]}
-    )
+    st.session_state.history.append({"role": "system", "content": sc["prompt"]})
 
-# ───────────────  conversation loop
-def handle_user_input():
+# ── CONVERSATION FLOW ────────────────────────────────────────────────
+def handle_turn():
+    # ①  Get user input
+    user_text: str | None
     if speak_mode:
         user_text = record_and_transcribe()
     else:
@@ -163,25 +191,32 @@ def handle_user_input():
     if not user_text:
         return
 
+    # ②  Show user bubble
     with st.chat_message("user"):
         st.write(user_text)
 
-    assistant_text = chat_completion(user_text, st.session_state.history)
-    st.session_state.history.extend(
-        [{"role": "user", "content": user_text},
-         {"role": "assistant", "content": assistant_text}]
-    )
-
+    # ③  Assistant response
+    assistant_text = chat(user_text)
     with st.chat_message("assistant"):
         st.write(assistant_text)
         if voice_reply:
-            audio_bytes = text_to_speech(assistant_text)
-            if audio_bytes:
-                st.audio(audio_bytes, format="audio/mp3")
+            audio = tts_bytes(assistant_text)
+            if audio:
+                st.audio(audio, format="audio/mp3")
 
-# main polling loop ― run each page refresh
-handle_user_input()
+handle_turn()
 
-st.divider()
-with st.expander("💾 Conversation (debug)"):
+# ── DEBUG (collapsed by default) ──────────────────────────────────────
+with st.expander("📜 Conversation (debug)", expanded=False):
     st.json(st.session_state.history)
+
+# ── HIDE “SELECT DEVICE” LABEL WITH CSS (optional) ────────────────────
+st.markdown(
+    """
+    <style>
+    label:has(> span[data-testid="stMarkdownContainer"]:contains("select device")) {
+        display:none !important;
+    }
+    </style>""",
+    unsafe_allow_html=True,
+)

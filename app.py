@@ -7,17 +7,21 @@ import time
 import sqlite3
 import datetime
 import base64
-from gtts import gTTS
+from gtts import gTTS                     # fallback TTS
+from streamlit_webrtc import webrtc_streamer   # 🎤 NEW
+import soundfile as sf                         # 🎤 NEW
 
-# ── DATABASE ───────────────────────────────────────
+# ── DATABASE ─────────────────────────────────────────────────────────
 DB = pathlib.Path(__file__).parent / "leaderboard.db"
 conn = sqlite3.connect(DB, check_same_thread=False)
 cur = conn.cursor()
-cur.execute("""CREATE TABLE IF NOT EXISTS leaderboard
-               (id INTEGER PRIMARY KEY, name TEXT, score INT, timestamp TEXT)""")
+cur.execute(
+    """CREATE TABLE IF NOT EXISTS leaderboard
+       (id INTEGER PRIMARY KEY, name TEXT, score INT, timestamp TEXT)"""
+)
 conn.commit()
 
-# ── SALES PILLARS & SCORING ────────────────────────
+# ── SALES PILLARS & SCORING ──────────────────────────────────────────
 PILLARS = {
     "rapport": ["i understand", "great question", "thank you for sharing"],
     "pain":    ["challenge", "issue", "pain point", "concern"],
@@ -42,6 +46,8 @@ COMPLIMENTS = {
     "close":   "Excellent closing! You moved the conversation forward with confidence."
 }
 
+
+# ── FUNCTIONS (narrative, scoring, etc.) ─────────────────────────────
 def generate_follow_up_narrative(sub_scores, scenario, persona):
     name = persona["persona_name"]
     company = scenario["prospect"]
@@ -90,27 +96,25 @@ def calc_score(msgs):
     total = int(sum(subs.values()))
     fb = [f"{'✅' if pts >= 10 else '⚠️'} {p.title()} {int(pts)}/20" for p, pts in subs.items()]
 
-    insights = [COMPLIMENTS[p] if pts >= 15 else FEEDBACK_HINTS[p] for p, pts in subs.items()]
+    insights = [COMPLIMENTS[p] if pts >= 15 else FEEDBACK_HINTS[p] for p in PILLARS]
     feedback_detail = "\n\n".join(
         [f"**{p.title()}**: {insights[i]}" for i, p in enumerate(PILLARS)]
     )
 
-    # Check for objection coverage
-    conversation = " ".join(
-        [m["content"].lower() for m in msgs if m["role"] == "user"]
-    )
+    # Objections
+    conversation = " ".join([m["content"].lower() for m in msgs if m["role"] == "user"])
     uncovered = [o for o in DEAL_OBJECTIONS if o in conversation]
     missed    = [o for o in DEAL_OBJECTIONS if o not in uncovered]
 
-    objection_summary = (
-        f"**Objections you uncovered:** {', '.join(uncovered) if uncovered else 'None'}"
+    feedback_detail += (
+        f"\n\n**Objections you uncovered:** {', '.join(uncovered) if uncovered else 'None'}"
         f"\n**Objections you missed:** {', '.join(missed) if missed else 'None'}"
     )
-    feedback_detail += "\n\n" + objection_summary
 
     return total, "\n".join(fb), subs, feedback_detail
 
-# ── TIMER HELPERS ──────────────────────────────────
+
+# ── TIMER HELPERS ────────────────────────────────────────────────────
 def init_timer():
     if "start" not in st.session_state:
         st.session_state.start = time.time()
@@ -129,18 +133,26 @@ def init_timer():
 def time_cap(window):
     return (time.time() - st.session_state.start) / 60 >= window
 
-# ── OPENAI CLIENT ──────────────────────────────────
+
+# ── OPENAI  +  ELEVENLABS CONFIG ────────────────────────────────────
 api = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 if not api:
     st.error("OPENAI_API_KEY missing")
     st.stop()
 client = openai.OpenAI(api_key=api)
 
-# ── LOAD SCENARIOS ─────────────────────────────────
+EL_API = st.secrets.get("ELEVEN_API_KEY") or os.getenv("ELEVEN_API_KEY")
+if EL_API:
+    from elevenlabs import generate, save, set_api_key
+    set_api_key(EL_API)                 # authenticate ElevenLabs
+    TTS_VOICE = os.getenv("ELEVEN_VOICE_ID") or "Rachel"   # default
+
+
+# ── LOAD SCENARIOS ──────────────────────────────────────────────────
 DATA = pathlib.Path(__file__).parent / "data" / "greenpayroll_scenarios.json"
 SCENARIOS = json.loads(DATA.read_text())
 
-# ── PAGE SETUP ─────────────────────────────────────
+# ── PAGE SETUP ───────────────────────────────────────────────────────
 st.set_page_config(page_title="Green Payroll Sales Trainer", page_icon="💬")
 st.title("💬 Green Payroll - Sales Training Chatbot")
 
@@ -151,19 +163,23 @@ if pdf.exists():
     href = f"data:application/pdf;base64,{b64}"
     st.sidebar.markdown(
         f'<a href="{href}" download="GreenPayroll_Playbook.pdf" '
-        f'style="text-decoration:none">'
-        f'<div style="background:#28a745;padding:8px;border-radius:4px;text-align:center;color:white">'
-        f'Download Sales Playbook</div></a>', unsafe_allow_html=True
+        f'style="text-decoration:none"><div style="background:#28a745;'
+        f'padding:8px;border-radius:4px;text-align:center;color:white">'
+        f'Download Sales Playbook</div></a>',
+        unsafe_allow_html=True
     )
 
 # Scenario selector
 names = [f"{s['id']}. {s['prospect']} ({s['category']})" for s in SCENARIOS]
 pick  = st.sidebar.selectbox("Choose a scenario", names)
-voice = st.sidebar.checkbox("🎙️ Voice Playback")
+
+# Voice options
+playback_voice = st.sidebar.checkbox("🔉 Play Assistant Voice")
+mic_input      = st.sidebar.checkbox("🎤 Mic Input (Whisper)")
 
 S = SCENARIOS[names.index(pick)]
 
-# ── Assess Difficulty Dynamically ──
+# ── Assess Difficulty Dynamically ───────────────────────────────────
 def assess_difficulty(scenario):
     desc = scenario.get("prospect_description", "").lower()
     if any(w in desc for w in ["multi-state","compliance","remote","credential","stipend","garnishment"]):
@@ -183,9 +199,9 @@ st.markdown(f"""
 **Company:** {S['prospect']}  
 **Difficulty:** {S['difficulty']['level']}  
 **Time Available:** {P['time_availability']['window']} min
-""" )
+""")
 
-# ── SYSTEM PROMPT ──────────────────────────────────
+# ── SYSTEM PROMPT ───────────────────────────────────────────────────
 sys = f"""
 You are **{P['persona_name']}**, **{P['persona_role']}** at **{S['prospect']}**.
 
@@ -206,32 +222,70 @@ Stay strictly in character using realistic objections & tone.
   "What does success look like?"
 
 - Preferred closing approaches:
-  - Offer demo  
-  - Offer free trial  
-  - "Does this sound like a fit?"  
-  - Next-step scheduling.
+  · Offer demo  
+  · Offer free trial  
+  · "Does this sound like a fit?"  
+  · Next-step scheduling.
 
 You have {P['time_availability']['window']} min for this call. End it if the rep wastes time.
 """
 
-# ── SESSION STATE ─────────────────────────────────
+# ── SESSION STATE ───────────────────────────────────────────────────
 if 'scenario' not in st.session_state or st.session_state.scenario != pick:
     st.session_state.scenario = pick
-    st.session_state.msgs = [{"role":"system","content":sys}]
+    st.session_state.msgs = [{"role": "system", "content": sys}]
     st.session_state.closed = False
     st.session_state.score = ""
     st.session_state.score_value = 0
 
 init_timer()
 
-# Chat input
-text = st.chat_input("Your message to the prospect")
+# ── VOICE INPUT HANDLER (Whisper) ───────────────────────────────────
+def handle_voice():
+    """Runs once when user stops recorder; returns transcript string or None."""
+    ctx = webrtc_streamer(
+        key="speech",
+        audio_receiver_size=1024,
+        desired_playback_rate=1.0,
+        sendback_audio=False,
+        media_stream_constraints={"audio": True, "video": False},
+    )
+    # The component stays mounted; wait until user presses Stop
+    if ctx.audio_receiver and (frames := ctx.audio_receiver.get_frames(timeout=1)):
+        pcm = b"".join(frames)
+        # Save temp WAV (48 kHz mono)
+        tmp_wav = "tmp_in.wav"
+        sf.write(tmp_wav, pcm, 48000, format="WAV")
+        with open(tmp_wav, "rb") as fp:
+            whisper_rsp = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=fp,
+                response_format="text"
+            )
+        return whisper_rsp.strip()
+    return None
+
+# ── COLLECT USER INPUT (text or voice) ──────────────────────────────
+text = None
+if mic_input:
+    st.markdown("##### Press **Start** ⇒ speak ⇒ **Stop** to send")
+    text = handle_voice()
+
+# fallback to normal chat_input if nothing captured
+if text is None:
+    _tmp = st.chat_input("Your message to the prospect")
+    if _tmp:
+        text = _tmp
+
+# ── PROCESS USER TURN ───────────────────────────────────────────────
 if text and not st.session_state.closed:
-    st.session_state.msgs.append({"role":"user","content":text})
+    st.session_state.msgs.append({"role": "user", "content": text})
+
+    # stop if time window elapsed
     if time_cap(P["time_availability"]["window"]):
         st.session_state.msgs.append({
-            "role":"assistant",
-            "content":f"**{P['persona_name']}**: Sorry, I need to hop to another meeting."
+            "role": "assistant",
+            "content": f"**{P['persona_name']}**: Sorry, I need to hop to another meeting."
         })
         st.session_state.closed = True
     else:
@@ -240,16 +294,25 @@ if text and not st.session_state.closed:
             messages=st.session_state.msgs
         )
         ans = rsp.choices[0].message.content.strip()
-        st.session_state.msgs.append({"role":"assistant","content":ans})
+        st.session_state.msgs.append({"role": "assistant", "content": ans})
 
-# Render chat
+# ── RENDER CHAT (with TTS playback) ─────────────────────────────────
+def say(text):
+    if EL_API:
+        audio = generate(text=text, voice=TTS_VOICE, model="eleven_monolingual_v1")
+        save(audio, "tts.mp3")
+        st.audio("tts.mp3", format="audio/mp3")
+    else:
+        gTTS(text).save("tts.mp3")
+        st.audio("tts.mp3", format="audio/mp3")
+
 for m in st.session_state.msgs[1:]:
-    st.chat_message("user" if m["role"] == "user" else "assistant").write(m["content"])
-    if voice and m["role"] == "assistant":
-        gTTS(m["content"]).save("tmp.mp3")
-        st.audio(open("tmp.mp3","rb").read(), format="audio/mp3")
+    msg_container = st.chat_message("user" if m["role"] == "user" else "assistant")
+    msg_container.write(m["content"])
+    if playback_voice and m["role"] == "assistant":
+        say(m["content"])
 
-# Sidebar controls
+# ── SIDEBAR CONTROLS & LEADERBOARD ──────────────────────────────────
 if st.sidebar.button("🔄 Reset Chat"):
     st.session_state.clear()
     st.rerun()
@@ -265,26 +328,5 @@ if st.sidebar.button("🔚 End & Score"):
         st.sidebar.success("Scored!")
 
 if st.session_state.score:
-    outcome_story = generate_follow_up_narrative(st.session_state.sub_scores, S, P)
-    st.sidebar.markdown("### 📘 What Happened Next")
-    st.sidebar.markdown(outcome_story)
-    st.sidebar.markdown(st.session_state.score)
-    st.sidebar.markdown("### 🧩 Score Breakdown")
-    for k, v in st.session_state.sub_scores.items():
-        st.sidebar.write(f"{k.title()}: {int(v)}/20")
-    st.sidebar.markdown("### 📣 Suggestions for Improvement")
-    st.sidebar.markdown(st.session_state.feedback_detail)
-    name = st.sidebar.text_input("Name:", key="nm")
-    if st.sidebar.button("🏅 Save to Leaderboard") and name:
-        cur.execute(
-            "INSERT INTO leaderboard(name,score,timestamp) VALUES(?,?,?)",
-            (name, st.session_state.score_value,
-             datetime.datetime.now())
-        )
-        conn.commit()
-    st.sidebar.write("### Top 10")
-    for i, (n, s) in enumerate(
-        cur.execute(
-            "SELECT name,score FROM leaderboard ORDER BY score DESC,timestamp ASC LIMIT 10"
-        ), start=1):
-        st.sidebar.write(f"{i}. {n} — {s}")
+    outcome_story = generate_follow_up_narrative(
+        st

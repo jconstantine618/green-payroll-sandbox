@@ -52,45 +52,77 @@ DEAL_OBJECTIONS = ["budget", "timing", "vendor", "implementation", "support", "a
 
 def calc_score(msgs):
     counts = {p: 0 for p in PILLARS}
-    convo = []
+    convo_texts = []
     for m in msgs:
-        if m["role"] != "user": continue
-        text = m["content"].lower()
-        convo.append(text)
+        if m["role"] != "user":
+            continue
+        txt = m["content"].lower()
+        convo_texts.append(txt)
         for p, kws in PILLARS.items():
-            if any(k in text for k in kws):
+            if any(k in txt for k in kws):
                 counts[p] += 1
-    subs = {p: min(v,3)*(20/3) for p,v in counts.items()}
-    total = int(sum(subs.values()))
-    brief = [f"{'✅' if subs[p]>=10 else '⚠️'} {p.title()} {int(subs[p])}/20" for p in PILLARS]
+
+    # cap at 3 occurrences → 20 points each
+    sub_scores = {p: min(v, 3) * (20/3) for p, v in counts.items()}
+    total = int(sum(sub_scores.values()))
+
+    # brief feedback
+    brief_fb = [
+        f"{'✅' if sub_scores[p] >= 10 else '⚠️'} {p.title()} {int(sub_scores[p])}/20"
+        for p in PILLARS
+    ]
+
+    # detailed feedback
     details = []
     for p in PILLARS:
-        if subs[p] >= 15:
+        pts = sub_scores[p]
+        if pts >= 15:
             details.append(f"**{p.title()}**: {COMPLIMENTS[p]}")
         else:
             details.append(f"**{p.title()}**: {FEEDBACK_HINTS[p]}")
-    conv_text = " ".join(convo)
-    found = [o for o in DEAL_OBJECTIONS if o in conv_text]
-    missed = [o for o in DEAL_OBJECTIONS if o not in conv_text]
-    obj_summary = f"**Objections uncovered:** {', '.join(found) or 'None'}\n**Objections missed:** {', '.join(missed) or 'None'}"
-    detailed = "\n\n".join(details + [obj_summary])
-    return total, "\n".join(brief), subs, detailed
+
+    # objections coverage
+    convo = " ".join(convo_texts)
+    found = [o for o in DEAL_OBJECTIONS if o in convo]
+    missed = [o for o in DEAL_OBJECTIONS if o not in convo]
+    obj_summary = (
+        f"**Objections uncovered:** {', '.join(found) if found else 'None'}\n"
+        f"**Objections missed:** {', '.join(missed) if missed else 'None'}"
+    )
+
+    detailed_fb = "\n\n".join(details + [obj_summary])
+    return total, "\n".join(brief_fb), sub_scores, detailed_fb
 
 def generate_follow_up(sub_scores, scenario, persona):
     name = persona["persona_name"]
     comp = scenario["prospect"]
     total = int(sum(sub_scores.values()))
-    cpts = sub_scores["close"]
-    rpt = sub_scores["rapport"]
-    ppts = sub_scores["pain"]
-    if total>=75 and cpts>=10:
-        return f"You and {name} agreed to review a proposal together. They were enthusiastic and {comp} is now a client."
-    elif total>=50 and cpts>=5:
-        return f"{name} requested detailed pricing and scheduled a follow-up next week. A second call is planned."
-    elif total>=35 and rpt>=10 and ppts>=5:
-        return f"You followed up via email; {name} replied they're reviewing internally. The opportunity remains open."
+    close_pts = sub_scores.get("close", 0)
+    rapport_pts = sub_scores.get("rapport", 0)
+    pain_pts = sub_scores.get("pain", 0)
+
+    if total >= 75 and close_pts >= 10:
+        return (
+            f"You and {name} agreed to review a proposal together. "
+            f"{name} was enthusiastic and {comp} is now a client."
+        )
+    elif total >= 50 and close_pts >= 5:
+        return (
+            f"{name} requested detailed pricing and scheduled a follow-up next week. "
+            "A second call is planned to finalize details."
+        )
+    elif total >= 35 and rapport_pts >= 10 and pain_pts >= 5:
+        return (
+            f"You followed up via email and received a brief reply. "
+            f"{name} said they’re reviewing internally and may reconnect later. "
+            "The opportunity remains open but requires persistence."
+        )
     else:
-        return f"You left a voicemail and emailed, but heard nothing back. After two weeks, {name} likely moved on. Marked lost."
+        return (
+            f"You left a voicemail and sent a follow-up email, but didn’t hear back. "
+            f"After two weeks of silence, it’s safe to assume {name} has moved on. "
+            "This opportunity is marked as lost."
+        )
 
 # ── TIMER HELPERS ─────────────────────────────────────
 def init_timer():
@@ -99,65 +131,68 @@ def init_timer():
         st.session_state.cut = False
 
 def show_timer(window):
-    elapsed = (time.time() - st.session_state.start)/60
-    rem = max(0, window - elapsed)
+    elapsed = (time.time() - st.session_state.start) / 60
+    remaining = max(0, window - elapsed)
     st.sidebar.markdown("### ⏱️ Time Remaining")
-    if rem<=1:
-        st.sidebar.warning("⚠️ <1 minute left")
-    elif rem<=3:
-        st.sidebar.info(f"⏳ {int(rem)} min left")
+    if remaining <= 1:
+        st.sidebar.warning("⚠️ Less than 1 minute remaining!")
+    elif remaining <= 3:
+        st.sidebar.info(f"⏳ {int(remaining)} minutes left")
     else:
-        st.sidebar.write(f"{int(rem)} minutes left")
-    return elapsed>=window
+        st.sidebar.write(f"{int(remaining)} minutes remaining")
+    return elapsed >= window
 
 # ── OPENAI CLIENT ─────────────────────────────────────
 api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 if not api_key:
-    st.error("Missing API key")
+    st.error("OPENAI_API_KEY missing")
     st.stop()
 client = openai.OpenAI(api_key=api_key)
 
 # ── LOAD ARCpoint SCENARIOS ───────────────────────────
-DATA = pathlib.Path(__file__).parent / "data" / "arcpoint_scenarios.json"
-SCENARIOS = json.loads(DATA.read_text())
+DATA_PATH = pathlib.Path(__file__).parent / "data" / "arcpoint_scenarios.json"
+SCENARIOS = json.loads(DATA_PATH.read_text())
 
 # ── PAGE SETUP ────────────────────────────────────────
 st.set_page_config(page_title="ARCpoint Sales Trainer", page_icon="💬")
 st.title("💬 ARCpoint Sales Training Chatbot")
 
 # ── DOWNLOAD PLAYBOOK BUTTON ──────────────────────────
-pdf = pathlib.Path(__file__).parent / "TPA Solutions Play Book.pdf"
-if pdf.exists():
-    b64 = base64.b64encode(pdf.read_bytes()).decode()
+pdf_path = pathlib.Path(__file__).parent / "TPA Solutions Play Book.pdf"
+if pdf_path.exists():
+    b64 = base64.b64encode(pdf_path.read_bytes()).decode()
     st.sidebar.markdown(
-        f'<a href="data:application/pdf;base64,{b64}" download="ARCpoint_Playbook.pdf" style="text-decoration:none">'
-        f'<div style="background:#d32f2f;padding:8px;border-radius:4px;text-align:center;color:white">'
-        f'Download Sales Playbook</div></a>', unsafe_allow_html=True
+        f'<a href="data:application/pdf;base64,{b64}" download="ARCpoint_Playbook.pdf" '
+        f'style="text-decoration:none">'
+        f'<div style="background:#d32f2f;padding:8px;border-radius:4px;'
+        f'text-align:center;color:white">Download Sales Playbook</div></a>',
+        unsafe_allow_html=True
     )
 
-# ── SCENARIO & PERSONA ─────────────────────────────────
-names = [f"{s['id']}. {s['prospect']} ({s['category']})" for s in SCENARIOS]
-pick = st.sidebar.selectbox("Choose a scenario", names)
-scenario = SCENARIOS[names.index(pick)]
+# ── SCENARIO & PERSONA SELECTION ─────────────────────
+scenario_names = [f"{s['id']}. {s['prospect']} ({s['category']})" for s in SCENARIOS]
+choice = st.sidebar.selectbox("Choose a scenario", scenario_names)
+scenario = SCENARIOS[scenario_names.index(choice)]
 
-if st.session_state.get("scenario") != pick:
+# reset on scenario change
+if st.session_state.get("scenario") != choice:
     st.session_state.clear()
-    st.session_state.scenario = pick
+    st.session_state.scenario = choice
 
 plist = scenario["decision_makers"]
 pidx = st.sidebar.selectbox(
     "Which decision-maker?",
     options=list(range(len(plist))),
     format_func=lambda i: f"{plist[i]['persona_name']} ({plist[i]['persona_role']})",
-    index=st.session_state.get("persona_idx",0)
+    index=st.session_state.get("persona_idx", 0)
 )
 st.session_state.persona_idx = pidx
 persona = plist[pidx]
 
-# ── BUILD PROMPT & INIT ───────────────────────────────
+# ── BUILD SYSTEM PROMPT ──────────────────────────────
 def build_prompt(scenario, persona):
-    tl = {"Easy":10,"Medium":15,"Hard":20}[scenario["difficulty"]["level"]]
-    others = [p["persona_name"] for p in plist if p!=persona]
+    tl = {"Easy":10, "Medium":15, "Hard":20}[scenario["difficulty"]["level"]]
+    others = [p["persona_name"] for p in plist if p != persona]
     note = f"You know {', '.join(others)} is another stakeholder." if others else ""
     pains = ", ".join(persona["pain_points"])
     return f"""
@@ -177,10 +212,10 @@ Stay in character.
 prompt = build_prompt(scenario, persona)
 init_timer()
 if "msgs" not in st.session_state:
-    st.session_state.msgs = [{"role":"system","content":prompt}]
+    st.session_state.msgs = [{"role": "system", "content": prompt}]
 
-# ── SHOW INFO ─────────────────────────────────────────
-tl = {"Easy":10,"Medium":15,"Hard":20}[scenario["difficulty"]["level"]]
+# ── DISPLAY INFO ─────────────────────────────────────
+tl = {"Easy":10, "Medium":15, "Hard":20}[scenario["difficulty"]["level"]]
 st.markdown(f"""
 **Persona:** {persona['persona_name']} ({persona['persona_role']})  
 **Company:** {scenario['prospect']}  
@@ -189,39 +224,44 @@ st.markdown(f"""
 
 # ── CHAT LOOP ─────────────────────────────────────────
 user_input = st.chat_input("Your message to the prospect")
-if user_input and not st.session_state.get("closed",False):
-    st.session_state.msgs.append({"role":"user","content":user_input})
-    end_now = show_timer(tl)
-    if end_now:
+if user_input and not st.session_state.get("closed", False):
+    st.session_state.msgs.append({"role": "user", "content": user_input})
+
+    timed_out = show_timer(tl)
+    if timed_out:
         st.session_state.msgs.append({
-            "role":"assistant",
-            "content":f"**{persona['persona_name']}**: Sorry, I need another meeting now."
+            "role": "assistant",
+            "content": f"**{persona['persona_name']}**: Sorry, I need another meeting now. Let's continue later."
         })
         st.session_state.closed = True
     else:
         lower = user_input.lower()
-        for idx,p in enumerate(plist):
-            if idx!=pidx and p["persona_name"].lower() in lower:
+        # handle persona switch
+        switched = False
+        for idx, p in enumerate(plist):
+            if idx != pidx and p["persona_name"].lower() in lower:
                 st.session_state.persona_idx = idx
                 persona = plist[idx]
+                # rebuild prompt
                 prompt = build_prompt(scenario, persona)
-                st.session_state.msgs[0] = {"role":"system","content":prompt}
+                st.session_state.msgs[0] = {"role": "system", "content": prompt}
                 st.session_state.msgs.append({
-                    "role":"assistant",
-                    "content":f"**{persona['persona_name']} ({persona['persona_role']}) has joined the meeting.**"
+                    "role": "assistant",
+                    "content": f"**{persona['persona_name']} ({persona['persona_role']}) has joined the meeting.**"
                 })
+                switched = True
                 break
-        else:
+        if not switched:
             resp = client.chat.completions.create(
                 model="gpt-3.5-turbo", messages=st.session_state.msgs
             )
             text = resp.choices[0].message.content.strip()
-            st.session_state.msgs.append({"role":"assistant","content":text})
+            st.session_state.msgs.append({"role": "assistant", "content": text})
 
 # ── RENDER CHAT ───────────────────────────────────────
 for m in st.session_state.msgs[1:]:
-    st.chat_message("user" if m["role"]=="user" else "assistant").write(m["content"])
-    if m["role"]=="assistant" and st.session_state.get("voice",False):
+    st.chat_message("user" if m["role"] == "user" else "assistant").write(m["content"])
+    if m["role"] == "assistant" and st.session_state.get("voice", False):
         gTTS(m["content"]).save("tmp.mp3")
         st.audio(open("tmp.mp3","rb").read(), format="audio/mp3")
 
@@ -231,29 +271,28 @@ if st.sidebar.button("🔄 Reset Chat"):
     st.session_state.clear()
     st.rerun()
 
-# End & Score
-if st.sidebar.button("🔚 End & Score") and not st.session_state.get("closed",False):
+if st.sidebar.button("🔚 End & Score") and not st.session_state.get("closed", False):
     total, brief_fb, subs, detail_fb = calc_score(st.session_state.msgs)
     st.session_state.closed = True
     st.sidebar.success("Scored!")
     st.session_state.total = total
     st.session_state.brief_fb = brief_fb
-    st.session_state.subs = subs
+    st.session_state.sub_scores = subs
     st.session_state.detail_fb = detail_fb
 
-# After scoring: show breakdown, feedback & leaderboard
-if st.session_state.get("closed",False):
+# After scoring, show outcome, breakdown, suggestions & leaderboard
+if st.session_state.get("closed", False):
     # What Happened Next
-    narrative = generate_follow_up(st.session_state.subs, scenario, persona)
+    narrative = generate_follow_up(st.session_state.sub_scores, scenario, persona)
     st.sidebar.markdown("### 📘 What Happened Next")
     st.sidebar.write(narrative)
 
-    # Your Score & Breakdown
+    # Score & breakdown
     st.sidebar.markdown("### 🏆 Your Score")
     st.sidebar.write(f"**{st.session_state.total}/100**")
     st.sidebar.markdown("### 📊 Breakdown")
-    for p,v in st.session_state.subs.items():
-        st.sidebar.write(f"{p.title()}: {int(v)}/20")
+    for p, pts in st.session_state.sub_scores.items():
+        st.sidebar.write(f"{p.title()}: {int(pts)}/20")
 
     # Suggestions for Improvement
     st.sidebar.markdown("### 📣 Suggestions for Improvement")
@@ -263,15 +302,15 @@ if st.session_state.get("closed",False):
     name = st.sidebar.text_input("Name:", key="name_input")
     if st.sidebar.button("🏅 Save to Leaderboard") and name:
         cur.execute(
-            "INSERT INTO leaderboard(name,score,timestamp) VALUES(?,?,?)",
+            "INSERT INTO leaderboard(name, score, timestamp) VALUES (?, ?, ?)",
             (name, st.session_state.total, datetime.datetime.now().isoformat())
         )
         conn.commit()
 
-    # Top 10
+    # Top 10 leaderboard
     st.sidebar.markdown("### 🥇 Top 10 Leaderboard")
     rows = cur.execute(
-        "SELECT name,score FROM leaderboard ORDER BY score DESC, timestamp ASC LIMIT 10"
+        "SELECT name, score FROM leaderboard ORDER BY score DESC, timestamp ASC LIMIT 10"
     ).fetchall()
-    for i,(n,s) in enumerate(rows, start=1):
+    for i, (n, s) in enumerate(rows, start=1):
         st.sidebar.write(f"{i}. {n} — {s}")
